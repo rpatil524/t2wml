@@ -370,7 +370,7 @@ def get_region_mapping(uid: str, pid: str, project, data_file_name=None, sheet_n
 	This function reads (and creates if it doesn't exist) and deserialize the respective wikifier config file
 	:param uid:
 	:param pid:
-	:param project:
+	:param project: Project
 	:param data_file_name:
 	:param sheet_name:
 	:return:
@@ -437,7 +437,7 @@ def save_yaml_config(yaml_config_file_path: Union[str, Path], yaml_config) -> No
 	"""
 	This function saves the YAMLFile object in a pickle file
 	:param yaml_config_file_path:
-	:param yaml_config:
+	:param yaml_config: YAMLFile
 	:return:
 	"""
 	with open(str(yaml_config_file_path), 'wb') as config_file:
@@ -448,8 +448,19 @@ def load_yaml_config(yaml_config_file_path: Union[str, Path]):
 	"""
 	This function loads the pickle file and deserialize the contents into a YAMLFile object
 	:param yaml_config_file_path:
-	:return:
+	:return: YAMLFile
 	"""
 	with open(str(yaml_config_file_path), 'rb') as config_file:
 		yaml_config = pickle.load(config_file)
 	return yaml_config
+
+
+def get_first_sheet_name(file_path: str):
+	"""
+	This function returns the first sheet name of the excel file
+	:param file_path:
+	:return:
+	"""
+	book_dict = pyexcel.get_book_dict(file_name=file_path)
+	for sheet in book_dict.keys():
+		return sheet
