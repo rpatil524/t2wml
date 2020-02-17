@@ -11,4 +11,5 @@ typing==3.7.4.1
 PyYAML==5.1.2
 Werkzeug==0.16.0
 google-api-python-client==1.7.11
+chardet==3.0.4
 etk

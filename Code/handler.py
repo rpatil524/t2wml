@@ -20,6 +20,7 @@ from Code.ColumnExpression import ColumnExpression
 from Code.RowExpression import RowExpression
 from etk.wikidata.utils import parse_datetime_string
 import pandas as pd
+import chardet
 
 __WIKIFIED_RESULT__ = str(Path.cwd() / "Datasets/data.worldbank.org/wikifier.csv")
 
@@ -514,7 +515,10 @@ def wikify_region(region: str, excel_filepath: str, sheet_name: str = None):
 
 
 def csv_to_dataframe(file_path):
-    df = pd.read_csv(file_path)
+    with open(file_path, 'rb') as fd:
+        result = chardet.detect(fd.read())
+        encoding = result['encoding']
+    df = pd.read_csv(file_path, encoding=encoding)
     return df
 
 
