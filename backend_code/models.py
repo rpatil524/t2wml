@@ -380,7 +380,7 @@ class YamlFile(db.Model):
 
     def highlight_region(self):
         return highlight_region(self.sheet.item_table, self.sheet.project_file.filepath, 
-                            self.sheet.name, self.yaml_configuration.region, self.yaml_configuration.template)
+                            self.sheet.name, self.yaml_configuration.region, self.yaml_configuration.template, self.sheet.project_file.project.sparql_endpoint)
 
     def resolve_cell(self, column, row):
         return resolve_cell(self.sheet.item_table, 

@@ -6,7 +6,7 @@ from typing import Sequence
 from backend_code.item_table import ItemTable
 from backend_code import t2wml_exceptions as T2WMLExceptions
 from backend_code.bindings import bindings
-from backend_code.utility_functions import translate_precision_to_integer, get_property_type
+from backend_code.utility_functions import translate_precision_to_integer, get_property_type, json_statement_validator
 from backend_code.spreadsheets.conversions import cell_range_str_to_tuples, cell_tuple_to_str
 from backend_code.t2wml_parser import get_cell
 from backend_code.triple_generator import generate_triples
@@ -53,7 +53,7 @@ def handle_variables(v):
     return col, row, _value
 
 def highlight_region(item_table: ItemTable, excel_data_filepath: str, sheet_name: str, region_specification: dict,
-                     template: dict) -> dict:
+                     template: dict, sparql_endpoint) -> dict:
     """
     This function add holes in the region_object and builds up the list of data_region, item_region and qualifier_region
     :param item_table:
@@ -63,102 +63,156 @@ def highlight_region(item_table: ItemTable, excel_data_filepath: str, sheet_name
     :param template:
     :return:
     """
+    # update_bindings(item_table, region_specification, excel_data_filepath, sheet_name)
+    # region = region_specification['region_object']
+    # head = region.get_head()
+    # data = {"dataRegion": set(), "item": set(), "referenceRegion": set(), "qualifierRegion": set(), "error": dict()}
+    # bindings["$col"] = head[0]
+    # bindings["$row"] = head[1]
+    # try:
+    #     item = template['item']
+    # except KeyError:
+    #     item = None
+    #
+    # try:
+    #     attributes = template['qualifier']
+    # except KeyError:
+    #     attributes = None
+    #
+    # try:
+    #     references = template['reference']
+    # except KeyError:
+    #     references = None
+    #
+    # list_type_attributes = [references, attributes]
+    #
+    # while region.sheet.get((bindings["$col"], bindings["$row"]), None) is not None:
+    #     try:
+    #         data_cell = cell_tuple_to_str((bindings["$col"], bindings["$row"]))
+    #         data["dataRegion"].add(data_cell)
+    #         if item and isinstance(item, (ItemExpression, ValueExpression, BooleanEquation)):
+    #             try:
+    #                 if item.variables:
+    #                     col, row, value = handle_variables(item)
+    #                     item_cell = cell_tuple_to_str((col, row))
+    #                     data["item"].add(item_cell)
+    #                 else:
+    #                     item_cell = get_cell(item)
+    #                     item_cell = cell_tuple_to_str(item_cell)
+    #                     data["item"].add(item_cell)
+    #             except AttributeError:
+    #                 pass
+    #         elif item and isinstance(item, (ColumnExpression, RowExpression)):
+    #             try:
+    #                 item_cell = get_cell(item)
+    #                 item_cell = cell_tuple_to_str(item_cell)
+    #                 data["item"].add(item_cell)
+    #             except AttributeError:
+    #                 pass
+    #         for index, attributes in enumerate(list_type_attributes):
+    #             if attributes:
+    #                 attribute_cells = set()
+    #                 for attribute in attributes:
+    #                     if isinstance(attribute["value"], (ItemExpression, ValueExpression, BooleanEquation)):
+    #                         try:
+    #                             if attribute["value"].variables:
+    #                                 variables = list(attribute["value"].variables)
+    #                                 num_of_variables = len(variables)
+    #                                 if num_of_variables == 1:
+    #                                     bindings[variables[0]] = 0
+    #                                     while not attribute["value"].evaluate(bindings):
+    #                                         bindings[variables[0]] += 1
+    #                                     col, row, value = attribute["value"].evaluate_and_get_cell(bindings)
+    #                                     attribute_cell = cell_tuple_to_str((col, row))
+    #                                     attribute_cells.add(attribute_cell)
+    #                                     del bindings[variables[0]]
+    #                             else:
+    #                                 attribute_cell = get_cell(attribute["value"])
+    #                                 attribute_cell = cell_tuple_to_str(attribute_cell)
+    #                                 attribute_cells.add(attribute_cell)
+    #                         except AttributeError:
+    #                             pass
+    #                     elif isinstance(attribute["value"], (ColumnExpression, RowExpression)):
+    #                         try:
+    #                             attribute_cell = get_cell(attribute["value"])
+    #                             attribute_cell = cell_tuple_to_str(attribute_cell)
+    #                             attribute_cells.add(attribute_cell)
+    #                         except AttributeError:
+    #                             pass
+    #                 if index == 0:
+    #                     data["referenceRegion"] |= attribute_cells
+    #                 else:
+    #                     data["qualifierRegion"] |= attribute_cells
+    #     except Exception as exception:
+    #         error = dict()
+    #         error["errorCode"], error["errorTitle"], error["errorDescription"] = exception.args
+    #         data['error'][cell_tuple_to_str((bindings["$col"], bindings["$row"]))] = error
+    #
+    #     if region.sheet[(bindings["$col"], bindings["$row"])].next is not None:
+    #         bindings["$col"], bindings["$row"] = region.sheet[(bindings["$col"], bindings["$row"])].next
+    #     else:
+    #         bindings["$col"], bindings["$row"] = None, None
+    #
+    # data['dataRegion'] = list(data['dataRegion'])
+    # data['item'] = list(data['item'])
+    # data['referenceRegion'] = list(data['referenceRegion'])
+    # data['qualifierRegion'] = list(data['qualifierRegion'])
+    # return data
     update_bindings(item_table, region_specification, excel_data_filepath, sheet_name)
+
     region = region_specification['region_object']
+    response = {"dataRegion": set(), "item": set(), "referenceRegion": set(), "qualifierRegion": set(), "error": dict()}
+
+    data = []
+    errors = dict()
     head = region.get_head()
-    data = {"dataRegion": set(), "item": set(), "referenceRegion": set(), "qualifierRegion": set(), "error": dict()}
     bindings["$col"] = head[0]
     bindings["$row"] = head[1]
-    try:
-        item = template['item']
-    except KeyError:
-        item = None
-
-    try:
-        attributes = template['qualifier']
-    except KeyError:
-        attributes = None
-
-    try:
-        references = template['reference']
-    except KeyError:
-        references = None
-
-    list_type_attributes = [references, attributes]
-
+    list_type_attributes = ['reference', 'qualifier']
     while region.sheet.get((bindings["$col"], bindings["$row"]), None) is not None:
         try:
-            data_cell = cell_tuple_to_str((bindings["$col"], bindings["$row"]))
-            data["dataRegion"].add(data_cell)
-            if item and isinstance(item, (ItemExpression, ValueExpression, BooleanEquation)):
-                try:
-                    if item.variables:
-                        col, row, value = handle_variables(item)
-                        item_cell = cell_tuple_to_str((col, row))
-                        data["item"].add(item_cell)
-                    else:
-                        item_cell = get_cell(item)
-                        item_cell = cell_tuple_to_str(item_cell)
-                        data["item"].add(item_cell)
-                except AttributeError:
-                    pass
-            elif item and isinstance(item, (ColumnExpression, RowExpression)):
-                try:
-                    item_cell = get_cell(item)
-                    item_cell = cell_tuple_to_str(item_cell)
-                    data["item"].add(item_cell)
-                except AttributeError:
-                    pass
-            for index, attributes in enumerate(list_type_attributes):
-                if attributes:
-                    attribute_cells = set()
-                    for attribute in attributes:
-                        if isinstance(attribute["value"], (ItemExpression, ValueExpression, BooleanEquation)):
-                            try:
-                                if attribute["value"].variables:
-                                    variables = list(attribute["value"].variables)
-                                    num_of_variables = len(variables)
-                                    if num_of_variables == 1:
-                                        bindings[variables[0]] = 0
-                                        while not attribute["value"].evaluate(bindings):
-                                            bindings[variables[0]] += 1
-                                        col, row, value = attribute["value"].evaluate_and_get_cell(bindings)
-                                        attribute_cell = cell_tuple_to_str((col, row))
-                                        attribute_cells.add(attribute_cell)
-                                        del bindings[variables[0]]
+            statement = evaluate_template(template, sparql_endpoint)
+            if statement:
+                current_cell = cell_tuple_to_str((bindings["$col"], bindings["$row"]))
+                data.append({'cell': current_cell, 'statement': statement})
+                response['dataRegion'].add(current_cell)
+                if 'cell' in statement:
+                    response['item'].add(statement['cell'])
+                for index, attribute_type in enumerate(list_type_attributes):
+                    if attribute_type in statement:
+                        for attribute in statement[attribute_type]:
+                            if 'cell' in attribute:
+                                if index == 0:
+                                    response['referenceRegion'].add(attribute['cell'])
                                 else:
-                                    attribute_cell = get_cell(attribute["value"])
-                                    attribute_cell = cell_tuple_to_str(attribute_cell)
-                                    attribute_cells.add(attribute_cell)
-                            except AttributeError:
-                                pass
-                        elif isinstance(attribute["value"], (ColumnExpression, RowExpression)):
-                            try:
-                                attribute_cell = get_cell(attribute["value"])
-                                attribute_cell = cell_tuple_to_str(attribute_cell)
-                                attribute_cells.add(attribute_cell)
-                            except AttributeError:
-                                pass
-                    if index == 0:
-                        data["referenceRegion"] |= attribute_cells
-                    else:
-                        data["qualifierRegion"] |= attribute_cells
+                                    response['qualifierRegion'].add(attribute['cell'])
         except Exception as exception:
-            error = dict()
-            error["errorCode"], error["errorTitle"], error["errorDescription"] = exception.args
-            data['error'][cell_tuple_to_str((bindings["$col"], bindings["$row"]))] = error
-
+            error = T2WMLExceptions.make_frontend_err_dict(str(exception))
+            errors[cell_tuple_to_str((bindings["$col"], bindings["$row"]))] = [error]
         if region.sheet[(bindings["$col"], bindings["$row"])].next is not None:
             bindings["$col"], bindings["$row"] = region.sheet[(bindings["$col"], bindings["$row"])].next
         else:
             bindings["$col"], bindings["$row"] = None, None
 
-    data['dataRegion'] = list(data['dataRegion'])
-    data['item'] = list(data['item'])
-    data['referenceRegion'] = list(data['referenceRegion'])
-    data['qualifierRegion'] = list(data['qualifierRegion'])
-    return data
+    validator_errors, verified_statements = json_statement_validator(data, sparql_endpoint)
+    #TODO
+    downloads_path = ""
+    with open(downloads_path, "w", encoding="utf8") as json_statements:
+        json.dump(verified_statements, json_statements, indent=3)
 
+    if validator_errors:
+        for key in validator_errors.keys():
+            if key in errors:
+                errors[key] += validator_errors[key]
+            else:
+                errors[key] = validator_errors[key]
+
+    response['dataRegion'] = list(response['dataRegion'])
+    response['item'] = list(response['item'])
+    response['qualifierRegion'] = list(response['qualifierRegion'])
+    response['referenceRegion'] = list(response['referenceRegion'])
+    response['error'] = errors
+    return response
 
 def resolve_cell(item_table: ItemTable, excel_data_filepath: str, sheet_name: str, region_specification: dict,
                  template: dict, column: int, row: int, sparql_endpoint: str) -> dict:

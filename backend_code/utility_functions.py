@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 import re
 import json
@@ -11,7 +12,6 @@ from google.auth.transport import requests
 from backend_code import t2wml_exceptions as T2WMLExceptions
 from backend_code.wikidata_property import get_property_type as gp
 from app_config import GOOGLE_CLIENT_ID
-
 
 
 def get_property_type(wikidata_property: str, sparql_endpoint: str) -> str:
@@ -250,7 +250,7 @@ def validate_yaml(yaml_file_path, sparql_endpoint):
                                             if key not in {'property', 'value', 'calendar',
                                                             'precision', 'time_zone', 'format', 'lang', 'longitude',
                                                             'latitude', 'unit'}:
-                                                errors+= "Unrecognized key '" + key + "' (statementMapping -> template -> " + attribute + "[" + str(i) + "] -> " + key + ") found"
+                                                errors+= "Unrecognized key '" + key + "' (statementMapping -> template -> " + attribute + "[" + str(i) + "] -> " + key + ") found\n"
                                     else:
                                         errors+= "Value of  key '" + attribute + "[" + str(i) + "]' (statementMapping -> template -> " + attribute + "[" + str(i) + "]) \
                                             must be a dictionary\n"
@@ -265,7 +265,307 @@ def validate_yaml(yaml_file_path, sparql_endpoint):
             errors+= "Key 'template' (statementMapping -> X) not found\n"
     else:
         errors+= "Key 'statementMapping' not found\n"
-    
     if errors:
             raise T2WMLExceptions.ErrorInYAMLFileException(errors)
 
+#TODO
+def check_if_item_exists(item: str, sparql_endpoint) -> bool:
+    item = item.strip()
+    query = """SELECT ?property WHERE  {  wd:""" + item + """ ?property ?value. }"""
+    sparql = SPARQLWrapper(sparql_endpoint)
+    sparql.setQuery(query)
+    sparql.setReturnFormat(JSON)
+    try:
+        results = sparql.query().convert()
+        value = results['results']['bindings']
+        if value:
+            return True
+        else:
+            return False
+    except Exception:
+        return False
+
+def validate_item(item: str, sparql_endpoint: str, item_existence_map: dict):
+    error = ""
+    if item not in item_existence_map:
+        item_exists = check_if_item_exists(item, sparql_endpoint)
+        if item_exists:
+            item_existence_map[item] = True
+        else:
+            error= "Item: " + item + " doesn't exist in wikidata"
+    return error
+
+def get_non_empty_dict(dictionary):
+    non_empty_dict = dict()
+    for key, value in dictionary.items():
+        if value:
+            non_empty_dict[key] = value
+    return non_empty_dict
+
+def merge_dicts(dict_1, dict_2):
+    keys = set().union(dict_1, dict_2)
+    merged_dict = dict()
+    for key in keys:
+        value_1 = dict_1.get(key, "")
+        value_2 = dict_2.get(key, "")
+        value = value_1 + value_2
+        merged_dict[key] = value
+    return merged_dict
+
+def categorized_error_to_error_list(categorized_error, is_warning=False):
+    error_list = list()
+    for key, value in categorized_error.items():
+        if key in T2WMLExceptions.exception_map:
+            error = T2WMLExceptions.exception_map[key](value)
+        else:
+            error = T2WMLExceptions.T2WMLException(value)
+        if is_warning:
+            error_list.append(error.warning_dict)
+        else:
+            error_list.append(error.error_dict)
+    return error_list
+
+def validate_value(statement, location_of_object_in_yaml_file, sparql_endpoint) -> dict:
+    property = statement['property']
+    property_type = get_property_type(property, sparql_endpoint)
+    errors = {'ErrorInYAMLFileException': "", 'ConstraintViolationErrorException': ""}
+    if property_type != 'GlobeCoordinate':
+        if 'value' not in statement:
+            errors['ErrorInYAMLFileException']+= "Key 'value' (" + location_of_object_in_yaml_file + " -> X) not found\n"
+
+    else:
+        if 'latitude' not in statement:
+            errors['ErrorInYAMLFileException']+= "Key 'latitude' (" + location_of_object_in_yaml_file + " -> X) not found\n"
+        if 'longitude' not in statement:
+            errors['ErrorInYAMLFileException']+= "Key 'longitude' (" + location_of_object_in_yaml_file + " -> X) not found\n"
+        if 'precision' not in statement:
+            errors['ErrorInYAMLFileException']+= "Key 'precision' (" + location_of_object_in_yaml_file + " -> X) not found\n"
+
+
+    if not errors:
+        if property_type == "WikibaseItem" or property_type == "WikibaseProperty":
+                if not isinstance(statement['value'], str) or not statement['value'].isalnum:
+                    errors['ErrorInYAMLFileException']+= "Value of key 'value' (" + location_of_object_in_yaml_file + " -> value ) should be a valid item\n"
+        elif property_type == "String":
+            if not isinstance(statement['value'], str):
+                errors['ErrorInYAMLFileException']+= "Value of key 'value' (" + location_of_object_in_yaml_file + " -> value ) should be string\n"
+        elif property_type == "Quantity":
+            if not isinstance(statement['value'], int) and not (isinstance(statement['value'], str) and statement['value'].isdigit()):
+                errors['ErrorInYAMLFileException']+= "Value of key 'value' (" + location_of_object_in_yaml_file + " -> value ) should be an integer\n"
+        elif property_type == "GlobeCoordinate":
+            try:
+                latitude = float(statement['latitude'])
+            except ValueError:
+                errors['ErrorInYAMLFileException']+= "Value of key 'latitude' (" + location_of_object_in_yaml_file + " -> latitude ) should be a decimal\n"
+
+            try:
+                longitude = float(statement['longitude'])
+            except ValueError:
+                errors['ErrorInYAMLFileException']+= "Value of key 'longitude' (" + location_of_object_in_yaml_file + " -> longitude ) should be a decimal\n"
+
+            try:
+                precision = float(statement['precision'])
+            except ValueError:
+                errors['ErrorInYAMLFileException']+= "Value of key 'precision' (" + location_of_object_in_yaml_file + " -> precision ) should be a decimal\n"
+        elif property_type == "Time":
+            value_regex = re.compile(r"^[+-]?[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T[0-5][0-9]:[0-5][0-9]:[0-5][0-9][Z]?$")
+            regex_matched = bool(value_regex.match(statement['value']))
+            if not regex_matched:
+                errors['ErrorInYAMLFileException']+= "Value of key 'value' (" + location_of_object_in_yaml_file + " -> value ) is not in a datetime format\n"
+
+            if 'precision' in statement:
+                if not isinstance(statement['precision'], int):
+                    errors['ErrorInYAMLFileException']+= "Value of key 'precision' (" + location_of_object_in_yaml_file + " -> precision ) should be an integer\n"
+                else:
+                    if statement['precision'] > 14 or statement['precision'] < 0:
+                        errors['ConstraintViolationErrorException']+= "Value of key 'precision' (" + location_of_object_in_yaml_file + " -> precision ) should be an integer between [0,14]\n"
+
+            else:
+                errors['ErrorInYAMLFileException']+= "Key 'precision' (" + location_of_object_in_yaml_file + " -> X) not found\n"
+
+            if 'calendar' in statement:
+                if isinstance(statement['calendar'], str):
+                    if statement['calendar'] != "Q1985727" and statement['calendar'] != "Q1985786":
+                        errors['ErrorInYAMLFileException']+= "Value of key 'calendar' (" + location_of_object_in_yaml_file + " -> value ) should be 'Q1985727' or 'Q1985786'\n"
+                else:
+                    errors['ErrorInYAMLFileException']+= "Value of key 'calendar' (" + location_of_object_in_yaml_file + " -> value ) should be 'Q1985727' or 'Q1985786'\n"
+            else:
+                errors['ErrorInYAMLFileException']+= "Key 'calendar' (" + location_of_object_in_yaml_file + " -> X) not found\n"
+
+            if 'time_zone' in statement:
+                try:
+                    value = int(statement['time_zone'])
+                    if value > 14 or value < -12:
+                        errors['ConstraintViolationErrorException']+= "Value of key 'time_zone' (" + location_of_object_in_yaml_file + " -> time_zone ) should be an integer between [-12.14]\n"
+                except ValueError:
+                    errors['ConstraintViolationErrorException']+= "Value of key 'time_zone' (" + location_of_object_in_yaml_file + " -> time_zone ) should be an integer between [-12.14]\n"
+            else:
+                errors['ErrorInYAMLFileException']+= "Key 'time_zone' (" + location_of_object_in_yaml_file + " -> X) not found\n"
+        # elif property_type == "Url":
+        #     TODO
+        # elif property_type == "Monolingualtext":
+        #     TODO
+    return errors
+
+def check_for_valid_keys(valid_keys: set, object: dict, location_of_object_in_yaml_file: str) -> str:
+    errors = ""
+    for key in object.keys():
+        if key not in valid_keys:
+            errors+="Unrecognized key '" + key + "' (" + location_of_object_in_yaml_file + " -> " + key + ") found\n"
+    return errors
+
+def validate_yaml_parameters_based_on_property_type(object: dict, location_of_object_in_yaml_file: str,
+                                                    sparql_endpoint: str, is_checking_for_qualifier: bool) -> dict:
+    template_property = str(object['property'])
+    errors = ""
+    # if template_property in property_type_map:
+    #     property_type = property_type_map[template_property]
+    # else:
+    property_type = get_property_type(template_property, sparql_endpoint)
+        # property_type_map[template_property] = property_type
+    if property_type == 'Time':
+        if is_checking_for_qualifier:
+            valid_keys = {'property', 'value', 'calendar', 'precision', 'time_zone', 'format', 'unit', 'cell'}
+        else:
+            valid_keys = {'property', 'value', 'calendar', 'precision', 'time_zone', 'format', 'item', 'qualifier',
+                          'unit', 'cell'}
+        error = check_for_valid_keys(valid_keys, object, location_of_object_in_yaml_file)
+        if error:
+            errors += error
+        if 'calendar' not in object:
+            errors+= "Key 'calendar' not found (" + location_of_object_in_yaml_file + " -> calendar)\n"
+        else:
+            if not object['calendar'] or not isinstance(object['calendar'], str):
+                errors+= "Value of  key 'calendar' (" + location_of_object_in_yaml_file + " -> calendar) must be a string\n"
+
+        if 'precision' not in object:
+            errors+= "Key 'precision' not found (" + location_of_object_in_yaml_file + " -> precision)\n"
+        else:
+            if not object['precision'] or not isinstance(object['precision'], (str, int)):
+                errors+= "Value of  key 'precision' (" + location_of_object_in_yaml_file + " -> precision) must be a string or an integer\n"
+
+        if 'time_zone' not in object:
+            errors+= "Key 'time_zone' not found (" + location_of_object_in_yaml_file + " -> time_zone)\n"
+        else:
+            if object['time_zone'] is None or not str(object['time_zone']).isdigit() or not isinstance(object['format'], (str, int)):
+                errors+= "Value of  key 'time_zone' (" + location_of_object_in_yaml_file + " -> time_zone) must be an integer\n"
+
+        if 'format' not in object:
+            errors+= "Key 'format' not found (" + location_of_object_in_yaml_file + " -> format)\n"
+        else:
+            if not object['format'] or not isinstance(object['format'], str):
+                errors+= "Value of  key 'format' (" + location_of_object_in_yaml_file + " -> format) must be a string\n"
+
+    elif property_type == 'Monolingualtext':
+        if is_checking_for_qualifier:
+            valid_keys = {'property', 'value', 'lang', 'unit', 'cell'}
+        else:
+            valid_keys = {'property', 'value', 'lang', 'item', 'qualifier', 'unit', 'cell'}
+        error = check_for_valid_keys(valid_keys, object, location_of_object_in_yaml_file)
+        if error:
+            errors += error
+
+        if 'lang' not in object:
+            errors+= "Key 'lang' not found (" + location_of_object_in_yaml_file + " -> lang)"
+        else:
+            if not object['lang'] or not isinstance(object['lang'], str):
+                errors+= "Value of  key 'lang' (" + location_of_object_in_yaml_file + " -> format) must be a lang\n"
+
+    elif property_type == 'GlobeCoordinate':
+        if is_checking_for_qualifier:
+            valid_keys = {'property', 'latitude', 'longitude', 'precision', 'unit', 'cell'}
+        else:
+            valid_keys = {'property', 'latitude', 'longitude', 'precision', 'item', 'qualifier', 'unit', 'cell'}
+        error = check_for_valid_keys(valid_keys, object, location_of_object_in_yaml_file)
+        if error:
+            errors += error
+
+        if 'latitude' not in object:
+            errors+= "Key 'latitude' not found (" + location_of_object_in_yaml_file + " -> latitude)\n"
+        else:
+            if not object['latitude'] or not isinstance(object['latitude'], (str, int)):
+                errors+= "Value of  key 'latitude' (" + location_of_object_in_yaml_file + " -> latitude) must be a string or an integer\n"
+
+        if 'longitude' not in object:
+            errors+= "Key 'longitude' not found (" + location_of_object_in_yaml_file + " -> longitude)\n"
+        else:
+            if not object['longitude'] or not isinstance(object['longitude'], (str, int)):
+                errors+= "Value of  key 'longitude' (" + location_of_object_in_yaml_file + " -> longitude) must be a string or an integer\n"
+
+        if 'precision' not in object:
+            errors+= "Key 'precision' not found (" + location_of_object_in_yaml_file + " -> precision)\n"
+        else:
+            if not object['precision'] or not isinstance(object['precision'], (str, int)):
+                errors+= "Value of  key 'precision' (" + location_of_object_in_yaml_file + " -> precision) must be a string or an integer\n"
+
+    elif property_type == "Property Not Found":
+        errors+= "Value of  key 'property' (" + location_of_object_in_yaml_file + " -> property) must be a valid item\n"
+    else:
+        if is_checking_for_qualifier:
+            valid_keys = {'property', 'value', 'unit', 'cell'}
+        else:
+            valid_keys = {'property', 'value', 'item', 'qualifier', 'unit', 'cell'}
+        error = check_for_valid_keys(valid_keys, object, location_of_object_in_yaml_file)
+        if error:
+            errors += error
+
+    categorized_error = {'ErrorInYAMLFileException': errors}
+    return categorized_error
+
+def json_statement_validator(statements: list, sparql_endpoint: str):
+    errors = dict()
+    item_existence_map = dict()
+    verified_statements = list()
+    for index, statement in enumerate(statements):
+        cell = statement['cell']
+        categorized_error = defaultdict(str)
+        categorized_warning = defaultdict(str)
+        if 'item' in statement['statement']:
+            item = statement['statement']['item']
+            error = validate_item(item, sparql_endpoint, item_existence_map)
+            if error:
+                categorized_warning['ItemNotFoundException']+= error
+            if 'property' in statement['statement']:
+                location_of_object_in_yaml_file = "statement"
+                is_checking_for_qualifier = False
+                error = validate_yaml_parameters_based_on_property_type(statement['statement'], location_of_object_in_yaml_file,
+                                                sparql_endpoint, is_checking_for_qualifier)
+                error = get_non_empty_dict(error)
+                if error:
+                    categorized_error = merge_dicts(categorized_error, error)
+                else:
+                    error = validate_value(statement['statement'], location_of_object_in_yaml_file, sparql_endpoint)
+                    error = get_non_empty_dict(error)
+                    if error:
+                        categorized_error = merge_dicts(categorized_error, error)
+                    else:
+                        if 'qualifier' in statement['statement']:
+                            for index, qualifier in enumerate(statement['statement']['qualifier']):
+                                location_of_object_in_yaml_file = "statement -> qualifier[" + str(index) + "]"
+                                is_checking_for_qualifier = True
+                                error = validate_yaml_parameters_based_on_property_type(qualifier,
+                                                                                        location_of_object_in_yaml_file,
+                                                                                        sparql_endpoint,
+                                                                                        is_checking_for_qualifier)
+                                error = get_non_empty_dict(error)
+                                if error:
+                                    categorized_error = merge_dicts(categorized_error, error)
+                                else:
+                                    error = validate_value(qualifier, location_of_object_in_yaml_file, sparql_endpoint)
+                                    error = get_non_empty_dict(error)
+                                    if error:
+                                        categorized_error = merge_dicts(categorized_error, error)
+            else:
+                categorized_error["ErrorInYAMLFileException"]+= "Key 'property' (statementMapping -> template -> X) not found\n"
+        else:
+            categorized_error["ErrorInYAMLFileException"]+= "Key 'item' (statementMapping -> template -> X) not found\n"
+        if categorized_error or categorized_warning:
+            errors[cell] = list()
+            errors[cell] += categorized_error_to_error_list(categorized_error, is_warning=False)
+            errors[cell] += categorized_error_to_error_list(categorized_warning, is_warning=True)
+        else:
+            verified_statements.append(statement)
+        # if not errors[cell]:
+        #     del errors[cell]
+        #     verified_statements.append(statement)
+    return errors, verified_statements

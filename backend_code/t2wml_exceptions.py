@@ -17,15 +17,21 @@ class T2WMLException(Exception):
 	@property
 	def error_dict(self):
 		return {
-			"errorCode": 500,
+			"errorCode": "Error",
 			"errorTitle": self.e_message,
 			"errorDescription": self.detail_message
 		}
 
+	@property
+	def warning_dict(self):
+		return {
+			"errorCode": "Warning",
+			"errorTitle": self.e_message,
+			"errorDescription": self.detail_message
+		}
 
 class InvalidRequestException(T2WMLException):
 	e_message="Resource requested without appropriate arguments"
-
 
 class ProjectsNotFoundException(T2WMLException):
 	e_message="No projects found"
@@ -56,7 +62,7 @@ class WikifyWithoutDataFileException(T2WMLException):
 class FileTooLargeException(T2WMLException):
 	e_message = "File exceeds the permitted file size"
 
-class ErrorInYAMLFileException(T2WMLException): 
+class ErrorInYAMLFileException(T2WMLException):
 	e_message= "Key not found in the YAML specification or value of a key in the YAML specification is not appropriate"
 
 class ValueErrorInYAMLFileException(T2WMLException):
@@ -79,3 +85,26 @@ class InvalidT2WMLExpressionException(T2WMLException):
 
 class ConstraintViolationErrorException(T2WMLException):
 	e_message = "Constraint on a given set of values have been violated"
+
+
+exception_map = {
+	'ConstraintViolationErrorException': ConstraintViolationErrorException,
+	'InvalidT2WMLExpressionException': InvalidT2WMLExpressionException,
+	'ItemNotFoundException': ItemNotFoundException,
+	'ValueOutOfBoundException': ValueOutOfBoundException,
+	'InvalidOperatorException': InvalidOperatorException,
+	'AuthenticationFailureException': AuthenticationFailureException,
+	'ValueErrorInYAMLFileException': ValueErrorInYAMLFileException,
+	'ErrorInYAMLFileException': ErrorInYAMLFileException,
+	'FileTooLargeException': FileTooLargeException,
+	'WikifyWithoutDataFileException': WikifyWithoutDataFileException,
+	'CellResolutionWithoutYAMLFileException': CellResolutionWithoutYAMLFileException,
+	'MissingYAMLFileException': MissingYAMLFileException,
+	'YAMLEvaluatedWithoutDataFileException': YAMLEvaluatedWithoutDataFileException,
+	'InvalidYAMLFileException': InvalidYAMLFileException,
+	'FileTypeNotSupportedException': FileTypeNotSupportedException,
+	'BlankFileNameException': BlankFileNameException,
+	'NoFilePartException': NoFilePartException,
+	'ProjectsNotFoundException': ProjectsNotFoundException,
+	'InvalidRequestException': InvalidRequestException
+}
